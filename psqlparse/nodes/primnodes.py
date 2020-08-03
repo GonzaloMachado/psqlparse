@@ -20,6 +20,7 @@ class RangeVar(Node):
         self.relpersistence = obj.get('relpersistence')
         self.alias = build_from_item(obj, 'alias')
         self.location = obj['location']
+        self.nullable = False
 
     def __repr__(self):
         return '<RangeVar (%s)>' % self.relname
@@ -33,6 +34,9 @@ class RangeVar(Node):
             if getattr(self, name, None) is not None
         ]
         return {'.'.join(components)}
+
+    def get_nullable_state(self):
+        return self.nullable
 
 
 class JoinExpr(Node):
@@ -59,6 +63,10 @@ class JoinExpr(Node):
         return self.larg.tables() | self.rarg.tables()
 
 
+    def get_nullable_state(self):
+        return list() 
+
+
 class Alias(Node):
 
     def __init__(self, obj):
@@ -67,6 +75,9 @@ class Alias(Node):
 
     def tables(self):
         return set()
+
+    def get_nullable_state(self):
+        return list() 
 
 
 class IntoClause(Node):
@@ -87,12 +98,27 @@ class BoolExpr(Expr):
         self.boolop = obj.get('boolop')
         self.args = build_from_item(obj, 'args')
         self.location = obj.get('location')
+        self.nullable = False
 
     def tables(self):
         _tables = set()
         for item in self.args:
             _tables |= item.tables()
         return _tables
+
+
+    def get_nullable_state(self):
+        _nullables = list()
+        for item in self.args:
+            if isinstance(item, SubLink):
+                item.get_nullable_state()
+                item.nullable |=  item.subselect.nullable_results
+                _nullables.append(item.nullable)
+            else:
+                _nullables.append(item.get_nullable_state())
+        if any(_nullables):
+            self.nullable = True
+        return self.nullable
 
 
 class SubLink(Expr):
@@ -104,9 +130,33 @@ class SubLink(Expr):
         self.oper_name = build_from_item(obj, 'operName')
         self.subselect = build_from_item(obj, 'subselect')
         self.location = obj.get('location')
+        self.nullable = False
 
     def tables(self):
         return self.subselect.tables()
+
+
+    def get_nullable_state(self):
+        #_nullables = list()
+        if self.testexpr:
+            # _nullables.append(self.testexpr.get_nullable_state())
+            # _nullable = self.testexpr.get_nullable_state()
+            self.testexpr.get_nullable_state()
+        # results, contents = self.subselect.get_nullable_state()
+        self.subselect.get_nullable_state()
+        """Type:Exists. Solo toma en cuenta el nullable contents"""
+        if self.sub_link_type == 0:
+            # self.nullable = self.subselect.nullable_contents
+            self.nullable = self.subselect.nullable_contents
+        """Type:Op-All, NOT IN Toma en cuenta results y contents"""
+        if self.sub_link_type == 1:
+            self.nullable = self.subselect.nullable_results | self.subselect.nullable_contents | self.textexpr.nullable
+        """Type:Op-Any, IN Toma en cuenta contents"""
+        if self.sub_link_type == 2:
+            self.nullable =  self.subselect.nullable_contents | self.testexpr.nullable
+        if self.sub_link_type == 4:
+            self.nullable =  self.subselect.nullable_results
+        return self.nullable
 
 
 class SetToDefault(Node):
@@ -144,6 +194,7 @@ class NullTest(Node):
         self.nulltesttype = obj.get('nulltesttype')
         self.argisrow = obj.get('argisrow')
         self.location = obj.get('location')
+        self.nullable = False
 
 
 class BooleanTest(Node):
@@ -152,6 +203,7 @@ class BooleanTest(Node):
         self.arg = build_from_item(obj, 'arg')
         self.booltesttype = obj.get('booltesttype')
         self.location = obj.get('location')
+        self.nullable = False
 
 
 class RowExpr(Node):

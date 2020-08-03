@@ -2,7 +2,7 @@ import six
 
 from .utils import build_from_item
 from .nodes import Node
-
+from prueba_db import check_all_nullables_in_instance, check_nullable_column
 
 class Statement(Node):
 
@@ -38,6 +38,8 @@ class SelectStmt(Statement):
         self.all = obj.get('all')
         self.larg = build_from_item(obj, 'larg')
         self.rarg = build_from_item(obj, 'rarg')
+        self.nullable_results = False
+        self.nullable_contents = False
 
     def tables(self):
         _tables = set()
@@ -58,6 +60,26 @@ class SelectStmt(Statement):
             _tables |= self.rarg.tables()
 
         return _tables
+
+
+    def get_nullable_state(self):
+        _nullable_results = list()
+        _nullable_contents = list()
+        if self.target_list:
+            for item in self.target_list:
+                _nullable_results.append(item.get_nullable_state())
+        if self.from_clause:
+            for item in self.from_clause:
+                pass
+        if self.where_clause:
+            _nullable_contents.append(self.where_clause.get_nullable_state())
+        if any(_nullable_results):
+            self.nullable_results = True
+        if any(_nullable_contents):
+            self.nullable_contents = True
+        return self.nullable_results, self.nullable_contents
+
+
 
 
 class InsertStmt(Statement):
@@ -209,6 +231,7 @@ class ResTarget(Node):
         self.indirection = build_from_item(obj, 'indirection')
         self.val = build_from_item(obj, 'val')
         self.location = obj.get('location')
+        self.nullable = False
 
     def tables(self):
         _tables = set()
@@ -220,15 +243,34 @@ class ResTarget(Node):
 
         return _tables
 
+    def get_nullable_state(self):
+        _nullables = list()
+        if isinstance(self.val, list):
+            for item in self.val:
+                _nullables.append(item.get_nullable_state())
+        elif isinstance(self.val, Node):
+            _nullables.append(self.val.get_nullable_state())
+        if any(_nullables):
+            self.nullable = True
+        return self.nullable
+
+
 
 class ColumnRef(Node):
 
     def __init__(self, obj):
         self.fields = build_from_item(obj, 'fields')
         self.location = obj.get('location')
+        self.nullable = False
 
     def tables(self):
         return set()
+
+    def get_nullable_state(self):
+        is_nullable = check_nullable_column(self.fields[0].str)
+        if is_nullable:
+            self.nullable = True
+        return is_nullable
 
 
 class FuncCall(Node):
@@ -256,10 +298,15 @@ class FuncCall(Node):
 class AStar(Node):
 
     def __init__(self, obj):
+        self.nullable = False
         pass
 
     def tables(self):
         return set()
+
+
+    def get_nullable_state(self):
+        return set()  
 
 
 class AExpr(Node):
@@ -270,6 +317,7 @@ class AExpr(Node):
         self.lexpr = build_from_item(obj, 'lexpr')
         self.rexpr = build_from_item(obj, 'rexpr')
         self.location = obj.get('location')
+        self.nullable = False
 
     def tables(self):
         _tables = set()
@@ -289,14 +337,44 @@ class AExpr(Node):
         return _tables
 
 
+    def get_nullable_state(self):
+        _nullables = list()
+
+        if isinstance(self.lexpr, list):
+            for item in self.lexpr:
+                _nullables.append(item.get_nullable_state())
+        elif isinstance(self.lexpr, Node):
+            _nullables.append(self.lexpr.get_nullable_state())
+
+        if isinstance(self.rexpr, list):
+            for item in self.rexpr:
+                _nullables.append(item.get_nullable_state())
+        elif isinstance(self.rexpr, Node):
+            _nullables.append(self.rexpr.get_nullable_state())
+
+        if any(_nullables):
+            self.nullable = True
+
+        return self.nullable
+
+
+
 class AConst(Node):
 
     def __init__(self, obj):
         self.val = build_from_item(obj, 'val')
         self.location = obj.get('location')
+        self.nullable = False
 
     def tables(self):
         return set()
+
+
+    def get_nullable_state(self):
+        if isinstance(self.val, dict):
+            if "Null" in self.val:
+                self.nullable = True
+        return self.nullable
 
 
 class TypeCast(Node):

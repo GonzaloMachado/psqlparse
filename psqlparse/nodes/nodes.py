@@ -3,6 +3,10 @@ import six
 
 class Node(object):
 
+    def __init__(self):
+        self.nullable = False
+
+
     def tables(self):
         """
         Generic method that does a depth-first search on the node attributes.
@@ -20,3 +24,18 @@ class Node(object):
                 _tables |= attr.tables()
 
         return _tables
+
+
+    def get_nullable_state(self):
+
+        _nullables = list()
+
+        for attr in six.itervalues(self.__dict__):
+            if isinstance(attr, list):
+                for item in attr:
+                    if isinstance(item, Node):
+                        _nullables.append(item.get_nullable_state())
+            elif isinstance(attr, Node):
+                _nullables.append(attr.get_nullable_state())
+
+        return _nullables
